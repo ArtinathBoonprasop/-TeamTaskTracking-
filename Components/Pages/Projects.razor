@@ -1,0 +1,99 @@
+@page "/projects"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject AppDbContext Db
+
+<PageTitle>Projects</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h1 class="mb-0">Projects</h1><span class="text-muted">จัดการโครงการของทีม</span></div>
+    <button class="btn btn-primary" @onclick="NewProject">+ เพิ่มโครงการ</button>
+</div>
+
+@if (!string.IsNullOrEmpty(Message))
+{
+    <div class="alert @(IsError ? "alert-danger" : "alert-success")">@Message</div>
+}
+
+@if (IsEditing)
+{
+    <div class="card card-body shadow-sm mb-4">
+        <h2 class="h5">@(EditProject.ProjectID == 0 ? "เพิ่มโครงการ" : "แก้ไขโครงการ")</h2>
+        <EditForm Model="EditProject" OnValidSubmit="SaveProject">
+            <DataAnnotationsValidator />
+            <div class="row g-3">
+                <div class="col-md-6"><label class="form-label">ชื่อโครงการ *</label><InputText class="form-control" @bind-Value="EditProject.ProjectName" /></div>
+                <div class="col-md-3"><label class="form-label">วันเริ่ม</label><InputDate class="form-control" @bind-Value="EditProject.StartDate" /></div>
+                <div class="col-md-3"><label class="form-label">วันสิ้นสุด</label><InputDate class="form-control" @bind-Value="EditProject.EndDate" /></div>
+                <div class="col-md-8"><label class="form-label">รายละเอียด</label><InputTextArea class="form-control" @bind-Value="EditProject.Description" /></div>
+                <div class="col-md-4"><label class="form-label">สถานะ</label><InputSelect class="form-select" @bind-Value="EditProject.Status"><option value="Active">Active</option><option value="Completed">Completed</option><option value="On Hold">On Hold</option></InputSelect></div>
+            </div>
+            <div class="mt-3"><button class="btn btn-success" type="submit">บันทึก</button><button class="btn btn-outline-secondary ms-2" type="button" @onclick="CancelEdit">ยกเลิก</button></div>
+        </EditForm>
+    </div>
+}
+
+<div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover mb-0">
+    <thead><tr><th>ชื่อโครงการ</th><th>สถานะ</th><th>เริ่ม</th><th>สิ้นสุด</th><th></th></tr></thead>
+    <tbody>
+        @if (ProjectList.Count == 0) { <tr><td colspan="5" class="text-center text-muted py-4">ยังไม่มีโครงการ</td></tr> }
+        @foreach (var project in ProjectList)
+        {
+            <tr><td><strong>@project.ProjectName</strong><div class="small text-muted">@project.Description</div></td><td>@(project.Status ?? "-")</td><td>@project.StartDate?.ToString("dd/MM/yyyy")</td><td>@project.EndDate?.ToString("dd/MM/yyyy")</td><td class="text-end"><button class="btn btn-sm btn-outline-primary" @onclick="() => StartEdit(project)">แก้ไข</button><button class="btn btn-sm btn-outline-danger ms-1" @onclick="() => DeleteProject(project.ProjectID)">ลบ</button></td></tr>
+        }
+    </tbody>
+</table></div></div>
+
+@code {
+    private List<Project> ProjectList = [];
+    private Project EditProject = new() { Status = "Active" };
+    private bool IsEditing;
+    private string? Message;
+    private bool IsError;
+
+    protected override async Task OnInitializedAsync() => await LoadProjects();
+
+    private async Task LoadProjects() => ProjectList = await Db.Projects.AsNoTracking().OrderByDescending(p => p.ProjectID).ToListAsync();
+    private void NewProject() { EditProject = new Project { Status = "Active" }; IsEditing = true; Message = null; }
+    private void CancelEdit() => IsEditing = false;
+    private void StartEdit(Project project)
+    {
+        EditProject = new Project { ProjectID = project.ProjectID, ProjectName = project.ProjectName, Description = project.Description, StartDate = project.StartDate, EndDate = project.EndDate, Status = project.Status };
+        IsEditing = true; Message = null;
+    }
+
+    private async Task SaveProject()
+    {
+        if (string.IsNullOrWhiteSpace(EditProject.ProjectName)) { Message = "กรุณากรอกชื่อโครงการ"; IsError = true; return; }
+
+        if (EditProject.ProjectID != 0 && EditProject.Status == "Completed")
+        {
+            var hasUnfinishedTasks = await Db.Tasks.AnyAsync(task =>
+                task.ProjectID == EditProject.ProjectID &&
+                (task.Status == null || task.Status != "Completed"));
+
+            if (hasUnfinishedTasks)
+            {
+                Message = "ปิดโครงการไม่ได้ เนื่องจากยังมีงานที่ไม่เสร็จ";
+                IsError = true;
+                return;
+            }
+        }
+
+        if (EditProject.ProjectID == 0) { EditProject.CreatedAt = DateTime.Now; Db.Projects.Add(EditProject); }
+        else
+        {
+            var project = await Db.Projects.FindAsync(EditProject.ProjectID);
+            if (project is null) { Message = "ไม่พบโครงการ"; IsError = true; return; }
+            project.ProjectName = EditProject.ProjectName; project.Description = EditProject.Description; project.StartDate = EditProject.StartDate; project.EndDate = EditProject.EndDate; project.Status = EditProject.Status;
+        }
+        await Db.SaveChangesAsync(); await LoadProjects(); IsEditing = false; IsError = false; Message = "บันทึกโครงการเรียบร้อยแล้ว";
+    }
+
+    private async Task DeleteProject(int projectId)
+    {
+        if (await Db.Tasks.AnyAsync(task => task.ProjectID == projectId)) { Message = "ลบโครงการนี้ไม่ได้ เพราะยังมีงานอยู่ในโครงการ"; IsError = true; return; }
+        var project = await Db.Projects.FindAsync(projectId);
+        if (project is not null) { Db.Projects.Remove(project); await Db.SaveChangesAsync(); await LoadProjects(); Message = "ลบโครงการแล้ว"; IsError = false; }
+    }
+}

@@ -1,0 +1,42 @@
+@page "/login"
+
+<PageTitle>เข้าสู่ระบบ</PageTitle>
+
+<div class="row justify-content-center">
+    <div class="col-md-7 col-lg-5">
+        <h1>เข้าสู่ระบบ</h1>
+        <p class="text-muted">Team Task Tracking</p>
+
+        @if (Registered)
+        {
+            <div class="alert alert-success">สมัครสมาชิกสำเร็จแล้ว กรุณาเข้าสู่ระบบ</div>
+        }
+        @if (Error == "invalid")
+        {
+            <div class="alert alert-danger">อีเมลหรือรหัสผ่านไม่ถูกต้อง</div>
+        }
+
+        <form method="post" action="/account/login" class="card card-body shadow-sm">
+            <AntiforgeryToken />
+            <div class="mb-3">
+                <label class="form-label" for="email">อีเมล</label>
+                <input id="email" name="Email" type="email" class="form-control" maxlength="150" required />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="password">รหัสผ่าน</label>
+                <input id="password" name="Password" type="password" class="form-control" required />
+            </div>
+            <button class="btn btn-primary" type="submit">เข้าสู่ระบบ</button>
+        </form>
+
+        <p class="mt-3">ยังไม่มีบัญชี? <a href="/register">สมัครสมาชิก</a></p>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "registered")]
+    private bool Registered { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    private string? Error { get; set; }
+}

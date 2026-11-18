@@ -1,0 +1,101 @@
+@page "/tasks"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject AppDbContext Db
+
+<PageTitle>Tasks</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h1 class="mb-0">Tasks</h1><span class="text-muted">จัดการงานและผู้รับผิดชอบ</span></div>
+    <button class="btn btn-primary" @onclick="NewTask">+ เพิ่มงาน</button>
+</div>
+
+@if (!string.IsNullOrEmpty(Message)) { <div class="alert @(IsError ? "alert-danger" : "alert-success")">@Message</div> }
+
+@if (IsEditing)
+{
+    <div class="card card-body shadow-sm mb-4">
+        <h2 class="h5">@(EditTask.TaskID == 0 ? "เพิ่มงาน" : "แก้ไขงาน")</h2>
+        <EditForm Model="EditTask" OnValidSubmit="SaveTask">
+            <DataAnnotationsValidator />
+            <div class="row g-3">
+                <div class="col-md-6"><label class="form-label">โครงการ *</label><InputSelect class="form-select" @bind-Value="EditTask.ProjectID"><option value="0">-- เลือกโครงการ --</option>@foreach (var project in ProjectList) { <option value="@project.ProjectID">@project.ProjectName</option> }</InputSelect></div>
+                <div class="col-md-6"><label class="form-label">ชื่องาน *</label><InputText class="form-control" @bind-Value="EditTask.TaskName" /></div>
+                <div class="col-md-4"><label class="form-label">กำหนดส่ง</label><InputDate class="form-control" @bind-Value="EditTask.DueDate" /></div>
+                <div class="col-md-4"><label class="form-label">สถานะ</label><InputSelect class="form-select" @bind-Value="EditTask.Status"><option value="Pending">Pending</option><option value="In Progress">In Progress</option><option value="Completed">Completed</option></InputSelect></div>
+                <div class="col-md-4"><label class="form-label">ผู้รับผิดชอบ</label><div class="border rounded p-2" style="max-height: 110px; overflow-y: auto;">@if (UserList.Count == 0) { <span class="text-muted">ยังไม่มีผู้ใช้</span> } @foreach (var user in UserList) { <div class="form-check"><input class="form-check-input" type="checkbox" checked="@SelectedUserIds.Contains(user.UserID)" @onchange="e => ToggleUser(user.UserID, e.Value is true)" /><label class="form-check-label">@user.FullName</label></div> }</div></div>
+                <div class="col-12"><label class="form-label">รายละเอียด</label><InputTextArea class="form-control" @bind-Value="EditTask.Description" /></div>
+            </div>
+            <div class="mt-3"><button class="btn btn-success" type="submit">บันทึก</button><button class="btn btn-outline-secondary ms-2" type="button" @onclick="CancelEdit">ยกเลิก</button></div>
+        </EditForm>
+    </div>
+}
+
+<div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover mb-0">
+    <thead><tr><th>งาน</th><th>โครงการ</th><th>สถานะ</th><th>กำหนดส่ง</th><th>ผู้รับผิดชอบ</th><th></th></tr></thead>
+    <tbody>
+        @if (TaskList.Count == 0) { <tr><td colspan="6" class="text-center text-muted py-4">ยังไม่มีงาน</td></tr> }
+        @foreach (var task in TaskList) { <tr><td><strong>@task.TaskName</strong><div class="small text-muted">@task.Description</div></td><td>@ProjectName(task.ProjectID)</td><td>@(task.Status ?? "-")</td><td>@task.DueDate?.ToString("dd/MM/yyyy")</td><td>@AssignmentCount(task.TaskID)</td><td class="text-end"><button class="btn btn-sm btn-outline-primary" @onclick="() => StartEdit(task)">แก้ไข</button><button class="btn btn-sm btn-outline-danger ms-1" @onclick="() => DeleteTask(task.TaskID)">ลบ</button></td></tr> }
+    </tbody>
+</table></div></div>
+
+@code {
+    private List<TaskItem> TaskList = [];
+    private List<Project> ProjectList = [];
+    private List<User> UserList = [];
+    private Dictionary<int, int> AssignmentCounts = [];
+    private HashSet<int> SelectedUserIds = [];
+    private TaskItem EditTask = new() { Status = "Pending" };
+    private bool IsEditing;
+    private string? Message;
+    private bool IsError;
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private async Task LoadData()
+    {
+        TaskList = await Db.Tasks.AsNoTracking().OrderByDescending(t => t.TaskID).ToListAsync();
+        ProjectList = await Db.Projects.AsNoTracking().OrderBy(p => p.ProjectName).ToListAsync();
+        UserList = await Db.Users.AsNoTracking().OrderBy(u => u.FullName).ToListAsync();
+        AssignmentCounts = await Db.TaskAssignments.GroupBy(a => a.TaskID).ToDictionaryAsync(group => group.Key, group => group.Count());
+    }
+
+    private string ProjectName(int id) => ProjectList.FirstOrDefault(p => p.ProjectID == id)?.ProjectName ?? "-";
+    private int AssignmentCount(int id) => AssignmentCounts.GetValueOrDefault(id);
+    private void ToggleUser(int id, bool selected) { if (selected) SelectedUserIds.Add(id); else SelectedUserIds.Remove(id); }
+    private void NewTask() { EditTask = new TaskItem { Status = "Pending" }; SelectedUserIds = []; IsEditing = true; Message = null; }
+    private void CancelEdit() => IsEditing = false;
+
+    private async Task StartEdit(TaskItem task)
+    {
+        EditTask = new TaskItem { TaskID = task.TaskID, ProjectID = task.ProjectID, TaskName = task.TaskName, Description = task.Description, DueDate = task.DueDate, Status = task.Status };
+        SelectedUserIds = (await Db.TaskAssignments.Where(a => a.TaskID == task.TaskID).Select(a => a.UserID).ToListAsync()).ToHashSet();
+        IsEditing = true; Message = null;
+    }
+
+    private async Task SaveTask()
+    {
+        if (EditTask.ProjectID == 0 || string.IsNullOrWhiteSpace(EditTask.TaskName)) { Message = "กรุณาเลือกโครงการและกรอกชื่องาน"; IsError = true; return; }
+        TaskItem savedTask;
+        if (EditTask.TaskID == 0) { EditTask.CreatedAt = DateTime.Now; Db.Tasks.Add(EditTask); savedTask = EditTask; }
+        else
+        {
+            savedTask = await Db.Tasks.FindAsync(EditTask.TaskID) ?? throw new InvalidOperationException("ไม่พบงาน");
+            savedTask.ProjectID = EditTask.ProjectID; savedTask.TaskName = EditTask.TaskName; savedTask.Description = EditTask.Description; savedTask.DueDate = EditTask.DueDate; savedTask.Status = EditTask.Status;
+        }
+        await Db.SaveChangesAsync();
+        var oldAssignments = await Db.TaskAssignments.Where(a => a.TaskID == savedTask.TaskID).ToListAsync();
+        Db.TaskAssignments.RemoveRange(oldAssignments);
+        Db.TaskAssignments.AddRange(SelectedUserIds.Select(userId => new TaskAssignment { TaskID = savedTask.TaskID, UserID = userId }));
+        await Db.SaveChangesAsync(); await LoadData(); IsEditing = false; IsError = false; Message = "บันทึกงานเรียบร้อยแล้ว";
+    }
+
+    private async Task DeleteTask(int taskId)
+    {
+        var assignments = await Db.TaskAssignments.Where(a => a.TaskID == taskId).ToListAsync();
+        Db.TaskAssignments.RemoveRange(assignments);
+        var task = await Db.Tasks.FindAsync(taskId);
+        if (task is not null) Db.Tasks.Remove(task);
+        await Db.SaveChangesAsync(); await LoadData(); Message = "ลบงานแล้ว"; IsError = false;
+    }
+}
