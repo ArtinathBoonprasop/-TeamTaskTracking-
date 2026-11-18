@@ -19,6 +19,15 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<TaskItem>(entity =>
+        {
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(task => task.ProjectID)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_Tasks_Projects");
+        });
+
         modelBuilder.Entity<TaskAssignment>(entity =>
         {
             entity.HasIndex(x => new { x.TaskID, x.UserID })

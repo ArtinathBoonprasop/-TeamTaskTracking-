@@ -35,6 +35,14 @@ builder.Services.AddRazorComponents()
 
 var app = builder.Build();
 
+// Creates the schema only when the connected database is empty (for example,
+// the first Railway deployment). Existing local tables and data are preserved.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.EnsureCreatedAsync();
+}
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
